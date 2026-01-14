@@ -38,39 +38,31 @@ class MarketOverviewService {
         }
 
         try {
-            // Encode symbol for URL (caret ^ needs encoding)
-            const encodedSymbol = encodeURIComponent(symbol);
-            const url = `${BASE_URL}/api/yahoo/v8/finance/chart/${encodedSymbol}`;
-            const response = await fetch(url);
+            const url = `${BASE_URL}/quote`;
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ ticker: symbol })
+            });
 
             if (!response.ok) {
                 console.warn(`Failed to fetch ${symbol}: ${response.status}`);
-                // Return mock data as fallback
                 return this.getMockIndexData(symbol);
             }
 
             const data = await response.json();
-            const result = data?.chart?.result?.[0];
 
-            if (!result) {
-                console.warn(`No data for ${symbol}`);
-                return this.getMockIndexData(symbol);
-            }
-
-            const meta = result.meta;
-            const currentPrice = meta.regularMarketPrice || meta.previousClose;
-            const previousClose = meta.chartPreviousClose || meta.previousClose;
-            const change = currentPrice - previousClose;
-            const changePercent = (change / previousClose) * 100;
-
+            // Map Rust API response to IndexData
             const indexData: IndexData = {
-                symbol,
+                symbol: data.ticker,
                 name: MARKET_INDICES[symbol as keyof typeof MARKET_INDICES]?.name || symbol,
-                price: currentPrice,
-                change,
-                changePercent,
-                previousClose,
-                volume: meta.regularMarketVolume || 0,
+                price: data.price,
+                change: data.change,
+                changePercent: data.change_percent,
+                previousClose: data.previous_close,
+                volume: data.volume,
                 lastUpdate: Date.now(),
             };
 

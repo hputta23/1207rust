@@ -31,6 +31,7 @@ async fn main() {
         .route("/simulate", post(simulate_handler))
         .route("/backtest", post(backtest_handler)) 
         .route("/history", post(history_handler)) 
+        .route("/quote", post(quote_handler)) 
         .layer(cors);
 
     // Get PORT from environment or default to 8001
@@ -72,6 +73,56 @@ async fn health_check() -> impl IntoResponse {
         timestamp: Utc::now().to_rfc3339(),
         service: "stonks-daily-rust".to_string(),
     })
+}
+
+// --- Quote Logic ---
+
+#[derive(Deserialize, Debug)]
+struct QuoteRequest {
+    ticker: String,
+}
+
+#[derive(Serialize)]
+struct QuoteResponse {
+    ticker: String,
+    price: f64,
+    change: f64,
+    change_percent: f64,
+    volume: u64,
+    previous_close: f64,
+    timestamp: i64,
+}
+
+async fn quote_handler(
+    Json(payload): Json<QuoteRequest>,
+) -> impl IntoResponse {
+    println!("⚡ Request: Quote for {}", payload.ticker);
+    
+    // Using the same data fetcher
+    let data_result = data::fetch_ticker_data(&payload.ticker).await;
+
+    match data_result {
+        Ok(data) => {
+             let current = data.current_price;
+             let prev = if data.close.len() >= 2 { data.close[data.close.len() - 2] } else { current };
+             let change = current - prev;
+             let change_percent = if prev != 0.0 { (change / prev) * 100.0 } else { 0.0 };
+             
+             Json(QuoteResponse {
+                 ticker: payload.ticker,
+                 price: current,
+                 change,
+                 change_percent,
+                 volume: 1000000, // Dummy
+                 previous_close: prev,
+                 timestamp: Utc::now().timestamp_millis(),
+             }).into_response()
+        }
+        Err(e) => {
+             println!("❌ Error fetching quote: {}", e);
+             (StatusCode::INTERNAL_SERVER_ERROR, format!("Data Error: {}", e)).into_response()
+        }
+    }
 }
 
 // --- History Logic ---

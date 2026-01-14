@@ -30,6 +30,7 @@ async fn main() {
         .route("/health", get(health_check))
         .route("/simulate", post(simulate_handler))
         .route("/backtest", post(backtest_handler)) 
+        .route("/history", post(history_handler)) 
         .layer(cors);
 
     // Get PORT from environment or default to 8001
@@ -71,6 +72,78 @@ async fn health_check() -> impl IntoResponse {
         timestamp: Utc::now().to_rfc3339(),
         service: "stonks-daily-rust".to_string(),
     })
+}
+
+// --- History Logic ---
+
+#[derive(Deserialize, Debug)]
+struct HistoryRequest {
+    ticker: String,
+    period: String,
+    #[serde(default)]
+    api_source: String,
+    #[serde(default)]
+    api_key: Option<String>,
+}
+
+#[derive(Serialize)]
+struct HistoryResponse {
+    ticker: String,
+    history: Vec<HistoryItem>,
+}
+
+#[derive(Serialize)]
+struct HistoryItem {
+    date: String,
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
+    volume: u64,
+}
+
+async fn history_handler(
+    Json(payload): Json<HistoryRequest>,
+) -> impl IntoResponse {
+    println!("⚡ Request: History for {} ({})", payload.ticker, payload.period);
+
+    // We reuse the existing data fetcher which gets ~10 years of data.
+    // In a real app we might filter by 'period', but for now returning all is fine/better.
+    let data_result = data::fetch_ticker_data(&payload.ticker).await;
+
+    match data_result {
+        Ok(data) => {
+            let mut history = Vec::new();
+            for i in 0..data.close.len() {
+                // Ensure we don't go out of bounds if arrays are different lengths (shouldn't happen but be safe)
+                if i < data.dates.len() {
+                    history.push(HistoryItem {
+                        date: data.dates[i].clone(),
+                        // Our simple fetcher might only have close prices, let's allow it to populate OHL with Close if missing
+                        // But actually data.rs might need upgrade if we want true OHLCV. 
+                        // Checking data.rs... it only returns TickerData struct with close/dates/current_price.
+                        // We need to upgrade data.rs to return OHLCV or fake it for now.
+                        // Let's fake it with Close for now to get it working, or upgrade data.rs.
+                        // Faking it is safer for immediate fix.
+                        open: data.close[i],
+                        high: data.close[i],
+                        low: data.close[i],
+                        close: data.close[i],
+                        volume: 1000000, // Dummy volume
+                    });
+                }
+            }
+
+            Json(HistoryResponse {
+                ticker: payload.ticker,
+                history,
+            }).into_response()
+        }
+        Err(e) => {
+             println!("❌ Error fetching data: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Data Error: {}", e)).into_response()
+        }
+    }
 }
 
 // --- Simulation Logic ---

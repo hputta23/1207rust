@@ -1,0 +1,13 @@
+services:
+  # Python Backend is REPLACED by Rust Backend
+  - type: web
+    name: terminal-pro-rust-backend
+    runtime: docker
+    rootDir: rust_server # Build context is the rust_server folder
+    plan: free # Change to starter/standard for production speed
+    region: oregon 
+    envVars:
+      - key: PORT
+        value: 10000 # Render expects standard ports, or we map it. 
+        # Actually our Dockerfile defaults to 8001 but Render sets PORT. 
+        # We need to make sure main.rs respects PORT env var.

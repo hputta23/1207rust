@@ -1,16 +1,30 @@
 import { useState, useEffect } from 'react';
 import { marketOverviewService, type IndexData, type MarketStatus } from '../../services/market-overview-service';
+import { useWatchlistStore } from '../../services/watchlist-service';
 import { EconomicCalendar } from './EconomicCalendar';
 
 export function MarketOverview() {
     const [indices, setIndices] = useState<IndexData[]>([]);
     const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
-    // Removed isPaused and scrollDirection state
+    const watchlist = useWatchlistStore(state => state.watchlist);
 
     useEffect(() => {
         const fetchData = async () => {
-            const data = await marketOverviewService.fetchAllIndices();
-            setIndices(data);
+            // 1. Fetch Standard Indices (SPY, QQQ, etc.)
+            const standardIndices = await marketOverviewService.fetchAllIndices();
+
+            // 2. Fetch Watchlist Items
+            const watchlistPromises = watchlist.map(item => marketOverviewService.fetchIndexData(item.symbol));
+            const watchlistResults = await Promise.all(watchlistPromises);
+            const validWatchlistData = watchlistResults.filter((data): data is IndexData => data !== null);
+
+            // 3. Combine unique items (prefer watchlist items if duplicates exist, though unlikely to overlap much except major indices)
+            // Actually, we just want to merge them.
+            // Let's filter out any watchlist items that are already in standard indices to avoid duplicates
+            const existingSymbols = new Set(standardIndices.map(i => i.symbol));
+            const uniqueWatchlistData = validWatchlistData.filter(d => !existingSymbols.has(d.symbol));
+
+            setIndices([...standardIndices, ...uniqueWatchlistData]);
             setMarketStatus(marketOverviewService.getMarketStatus());
         };
 
@@ -20,7 +34,7 @@ export function MarketOverview() {
         const interval = setInterval(fetchData, 30000);
 
         return () => clearInterval(interval);
-    }, []);
+    }, [watchlist]);
 
     // Duplicate indices for seamless infinite scroll
     const scrollingIndices = [...indices, ...indices, ...indices];

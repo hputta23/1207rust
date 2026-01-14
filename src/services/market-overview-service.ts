@@ -5,6 +5,8 @@ export const MARKET_INDICES = {
     '^IXIC': { name: 'NASDAQ', symbol: '^IXIC' },
     '^DJI': { name: 'Dow Jones', symbol: '^DJI' },
     '^RUT': { name: 'Russell 2000', symbol: '^RUT' },
+    'SPY': { name: 'SPY ETF', symbol: 'SPY' },
+    'QQQ': { name: 'QQQ ETF', symbol: 'QQQ' },
 } as const;
 
 export interface IndexData {

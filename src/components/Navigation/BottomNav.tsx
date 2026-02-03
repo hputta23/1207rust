@@ -9,6 +9,7 @@ export function BottomNav() {
         { label: 'Charts', path: '/charts', icon: '📈' },
         { label: 'Market', path: '/news', icon: '📰' }, // Combined News/Watchlist landing? Or just News
         { label: 'Screen', path: '/screener', icon: '🔍' },
+        { label: 'Sonny', path: '/sonny', icon: '🤖' },
         { label: 'Trade', path: '/trading', icon: '⚡' },
         { label: 'More', path: '/analytics', icon: '📊' }
     ];

@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './state/auth-context';
 import { ThemeToggle } from './components/Theme/ThemeToggle';
 import { useThemeStore, getThemeColors } from './services/theme-service';
 import { AlertsBadge } from './components/Alerts/AlertsBadge';
+import { ScreenerPage } from './pages/ScreenerPage';
 import { ProfileModal } from './components/Profile/ProfileModal';
 import { useUserProfileStore } from './services/user-profile-service';
 import { useState, lazy, Suspense } from 'react';
@@ -152,6 +153,22 @@ function AppContent() {
               News
             </Link>
             <Link
+              to="/screener"
+              style={{
+                padding: '8px 16px',
+                background: location.pathname === '/screener' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                border: location.pathname === '/screener' ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid transparent',
+                borderRadius: '6px',
+                color: location.pathname === '/screener' ? '#3b82f6' : '#888',
+                fontSize: '14px',
+                fontWeight: 500,
+                textDecoration: 'none',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Screener
+            </Link>
+            <Link
               to="/sonny"
               style={{
                 padding: '8px 16px',
@@ -291,6 +308,7 @@ function AppContent() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/charts" element={<ChartsPage />} />
             <Route path="/news" element={<NewsTab />} />
+            <Route path="/screener" element={<ScreenerPage />} />
             <Route path="/watchlist" element={<WatchlistTab />} />
             <Route path="/trading" element={<TradingPage />} />
             <Route path="/sonny" element={<SonnyPage />} />

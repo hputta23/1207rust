@@ -8,6 +8,7 @@ export function BottomNav() {
         { label: 'Dash', path: '/', icon: '🏠' },
         { label: 'Charts', path: '/charts', icon: '📈' },
         { label: 'Market', path: '/news', icon: '📰' }, // Combined News/Watchlist landing? Or just News
+        { label: 'Screen', path: '/screener', icon: '🔍' },
         { label: 'Trade', path: '/trading', icon: '⚡' },
         { label: 'More', path: '/analytics', icon: '📊' }
     ];

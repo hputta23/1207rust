@@ -57,7 +57,7 @@ export function LoginPage() {
                     </div>
 
                     <h1 style={{
-                        fontSize: '56px',
+                        fontSize: '42px',
                         fontWeight: 800,
                         marginBottom: '24px',
                         lineHeight: 1.1,
@@ -70,7 +70,7 @@ export function LoginPage() {
                     </h1>
 
                     <p style={{
-                        fontSize: '20px',
+                        fontSize: '16px',
                         color: '#64748b',
                         lineHeight: 1.6,
                         maxWidth: '520px',

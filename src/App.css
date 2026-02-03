@@ -210,8 +210,8 @@ input {
 /* Desktop: Use Grid Layout for larger screens */
 @media (min-width: 1024px) {
   .page-container {
-    height: calc(100vh - 50px);
-    overflow: hidden;
+    min-height: calc(100vh - 50px);
+    overflow-y: auto;
     /* Fix body scroll on desktop */
   }
 

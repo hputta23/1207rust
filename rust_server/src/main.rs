@@ -1,5 +1,6 @@
 mod models;
 mod data;
+mod agent;
 
 use axum::{
     routing::{get, post},
@@ -15,6 +16,9 @@ use chrono::Utc;
 
 #[tokio::main]
 async fn main() {
+    // Load environment variables from .env file
+    dotenv::dotenv().ok();
+
     // Initialize logging
     tracing_subscriber::fmt::init();
 
@@ -31,7 +35,8 @@ async fn main() {
         .route("/simulate", post(simulate_handler))
         .route("/backtest", post(backtest_handler)) 
         .route("/history", post(history_handler)) 
-        .route("/quote", post(quote_handler)) 
+        .route("/quote", post(quote_handler))
+        .route("/agent/chat", post(agent::chat_handler)) // New Agent Route
         .layer(cors);
 
     // Get PORT from environment or default to 8001
@@ -98,23 +103,18 @@ async fn quote_handler(
 ) -> impl IntoResponse {
     println!("⚡ Request: Quote for {}", payload.ticker);
     
-    // Using the same data fetcher
-    let data_result = data::fetch_ticker_data(&payload.ticker).await;
+    // Use lightweight quote fetcher
+    let quote_result = data::fetch_ticker_quote(&payload.ticker).await;
 
-    match data_result {
-        Ok(data) => {
-             let current = data.current_price;
-             let prev = if data.close.len() >= 2 { data.close[data.close.len() - 2] } else { current };
-             let change = current - prev;
-             let change_percent = if prev != 0.0 { (change / prev) * 100.0 } else { 0.0 };
-             
+    match quote_result {
+        Ok(price) => {
              Json(QuoteResponse {
                  ticker: payload.ticker,
-                 price: current,
-                 change,
-                 change_percent,
-                 volume: 1000000, // Dummy
-                 previous_close: prev,
+                 price,
+                 change: 0.0, // We could fetch more if needed, but price is key
+                 change_percent: 0.0,
+                 volume: 0, 
+                 previous_close: price, // Placeholder
                  timestamp: Utc::now().timestamp_millis(),
              }).into_response()
         }
@@ -131,6 +131,8 @@ async fn quote_handler(
 struct HistoryRequest {
     ticker: String,
     period: String,
+    #[serde(default)]
+    interval: Option<String>,
     #[serde(default)]
     api_source: String,
     #[serde(default)]
@@ -156,31 +158,26 @@ struct HistoryItem {
 async fn history_handler(
     Json(payload): Json<HistoryRequest>,
 ) -> impl IntoResponse {
-    println!("⚡ Request: History for {} ({})", payload.ticker, payload.period);
+    let interval = payload.interval.unwrap_or_else(|| "1d".to_string());
+    println!("⚡ Request: History for {} (Interval: {}, Range: {})", payload.ticker, interval, payload.period);
 
     // We reuse the existing data fetcher which gets ~10 years of data.
     // In a real app we might filter by 'period', but for now returning all is fine/better.
-    let data_result = data::fetch_ticker_data(&payload.ticker).await;
+    let data_result = data::fetch_ticker_data(&payload.ticker, &interval, &payload.period).await;
 
     match data_result {
         Ok(data) => {
             let mut history = Vec::new();
             for i in 0..data.close.len() {
-                // Ensure we don't go out of bounds if arrays are different lengths (shouldn't happen but be safe)
+                // Ensure we don't go out of bounds
                 if i < data.dates.len() {
                     history.push(HistoryItem {
                         date: data.dates[i].clone(),
-                        // Our simple fetcher might only have close prices, let's allow it to populate OHL with Close if missing
-                        // But actually data.rs might need upgrade if we want true OHLCV. 
-                        // Checking data.rs... it only returns TickerData struct with close/dates/current_price.
-                        // We need to upgrade data.rs to return OHLCV or fake it for now.
-                        // Let's fake it with Close for now to get it working, or upgrade data.rs.
-                        // Faking it is safer for immediate fix.
-                        open: data.close[i],
-                        high: data.close[i],
-                        low: data.close[i],
+                        open: data.open[i],
+                        high: data.high[i],
+                        low: data.low[i],
                         close: data.close[i],
-                        volume: 1000000, // Dummy volume
+                        volume: data.volume[i],
                     });
                 }
             }
@@ -192,7 +189,7 @@ async fn history_handler(
         }
         Err(e) => {
              println!("❌ Error fetching data: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Data Error: {}", e)).into_response()
+             (StatusCode::INTERNAL_SERVER_ERROR, format!("Data Error: {}", e)).into_response()
         }
     }
 }
@@ -251,7 +248,7 @@ async fn simulate_handler(
     println!("⚡ Request: Simulate {} for {} days", payload.ticker, payload.days);
 
     // 1. Fetch Data
-    let data_result = data::fetch_ticker_data(&payload.ticker).await;
+    let data_result = data::fetch_ticker_data(&payload.ticker, "1d", "2y").await;
     
     match data_result {
         Ok(data) => {
@@ -329,7 +326,7 @@ async fn backtest_handler(
     let capital = if payload.initial_capital > 0.0 { payload.initial_capital } else { 10000.0 };
 
     // 1. Fetch Data
-    let data_result = data::fetch_ticker_data(&payload.ticker).await;
+    let data_result = data::fetch_ticker_data(&payload.ticker, "1d", "5y").await;
 
     match data_result {
         Ok(data) => {
@@ -356,7 +353,7 @@ async fn backtest_handler(
         }
         Err(e) => {
              println!("❌ Error fetching data: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Data Error: {}", e)).into_response()
+             (StatusCode::INTERNAL_SERVER_ERROR, format!("Data Error: {}", e)).into_response()
         }
     }
 }

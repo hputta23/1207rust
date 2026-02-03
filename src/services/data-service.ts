@@ -26,16 +26,34 @@ export class DataService {
     private isStatic = false;
     private config: DataServiceConfig;
 
+    private symbol = 'SPY';
+
     constructor(useStaticData = false, _symbol = 'SPY', config?: DataServiceConfig) {
         this.isStatic = useStaticData;
+        this.symbol = _symbol;
         this.config = config || { dataSource: 'yahoo' };
 
         if (this.isStatic) {
-            this.generateStaticFixture();
+            this.generateStaticFixture(this.symbol);
         } else {
             // Start with mock data, will be replaced by fetchHistory
-            this.generateInitialHistory();
-            this.startSimulation();
+            this.generateInitialHistory(this.symbol);
+            this.startPolling(_symbol);
+        }
+    }
+
+    private getBasePrice(symbol: string): number {
+        switch (symbol) {
+            case 'SPY': return 500.0;
+            case 'QQQ': return 400.0;
+            case 'NVDA': return 900.0;
+            case 'AAPL': return 180.0;
+            case 'TSLA': return 200.0;
+            case 'AMD': return 160.0;
+            case 'MSFT': return 420.0;
+            case 'AMZN': return 180.0;
+            case 'GOOGL': return 170.0;
+            default: return 100.0;
         }
     }
 
@@ -45,9 +63,9 @@ export class DataService {
             case '5m': return '5d'; // 5 days of 5m data is good context
             case '15m': return '5d';
             case '30m': return '1mo';
-            case '1h': return '1mo';
-            case '1d': return '1y';
-            case '1wk': return '5y';
+            case '1h': return '1y'; // Increased from 1mo
+            case '1d': return '5y'; // Increased from 1y
+            case '1wk': return 'max'; // Increased from 5y
             case '1mo': return 'max';
             default: return '1mo';
         }
@@ -62,6 +80,8 @@ export class DataService {
      * Falls back to mock data if API fails
      */
     public async fetchHistory(symbol: string, interval = '5m', range?: string): Promise<void> {
+        this.symbol = symbol; // Update current symbol
+        // ... rest of method
         const now = Date.now();
 
         // Prevent too frequent refetches (rate limiting)
@@ -80,13 +100,15 @@ export class DataService {
             this.lastFetchTime = now;
             let history: any[] = [];
 
-            // Use Yahoo Finance via Vite proxy for direct API access
+            // Use backend for all data sources (since backend handles Yahoo proxying via /history)
             if (this.config.dataSource === 'yahoo') {
-                history = await this.fetchFromYahoo(symbol, interval, range!);
+                // history = await this.fetchFromYahoo(symbol, interval, range!);
+                // Use backend history endpoint instead which wraps Yahoo
+                history = await this.fetchFromBackendWithInterval(symbol, interval, range!);
             }
             // Use backend for other data sources
             else {
-                history = await this.fetchFromBackend(symbol, range!);
+                history = await this.fetchFromBackendWithInterval(symbol, interval, range!);
             }
 
             if (history.length === 0) {
@@ -103,7 +125,7 @@ export class DataService {
             console.log(`✅ Loaded ${history.length} candles for ${symbol} from ${this.config.dataSource}`);
 
             // Start live updates simulation (approximates real-time updates)
-            this.startSimulation();
+            this.startPolling(symbol);
 
         } catch (error) {
             console.error(`❌ Failed to fetch data for ${symbol} from ${this.config.dataSource}:`, error);
@@ -123,7 +145,7 @@ export class DataService {
 
                 // Fallback to mock data
                 this.stop();
-                this.generateStaticFixture();
+                this.generateStaticFixture(symbol);
             }
         }
     }
@@ -147,7 +169,7 @@ export class DataService {
         const history: any[] = [];
         const now = Date.now();
         const days = 365 * 20; // 20 years of history (increased from 10)
-        let price = 150.0; // Start somewhere plausible
+        let price = this.getBasePrice(symbol);
 
         // Deterministic seed-ish based on symbol char codes
         let seed = symbol.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -224,7 +246,11 @@ export class DataService {
         return history;
     }
 
-    private async fetchFromBackend(symbol: string, period: string): Promise<any[]> {
+    private async fetchFromBackend(symbol: string, range: string): Promise<any[]> {
+        return this.fetchFromBackendWithInterval(symbol, '1d', range);
+    }
+
+    private async fetchFromBackendWithInterval(symbol: string, interval: string, range: string): Promise<any[]> {
         const response = await fetch(`${BASE_URL}/history`, {
             method: 'POST',
             headers: {
@@ -232,7 +258,8 @@ export class DataService {
             },
             body: JSON.stringify({
                 ticker: symbol,
-                period: period,
+                period: range, // Backend expects 'period' as range
+                interval: interval.toLowerCase(),
                 api_source: this.config.dataSource,
                 api_key: this.config.apiKey,
             }),
@@ -246,7 +273,7 @@ export class DataService {
         const historyData = data?.history || [];
 
         return historyData.map((item: any) => ({
-            t: new Date(item.date).getTime(),
+            t: new Date(item.date).getTime(), // Backend returns ISO string
             o: item.open,
             h: item.high,
             l: item.low,
@@ -255,12 +282,14 @@ export class DataService {
         }));
     }
 
-    private generateStaticFixture() {
+    private generateStaticFixture(symbol: string = 'SPY') {
         const history: any[] = [];
-        const baseTime = 1700000000000; // Fixed timestamp
-        let price = 1500;
+        const now = Date.now();
+        const count = 50;
+        const baseTime = now - (count * this.updateRateMs); // Ends at roughly now
+        let price = this.getBasePrice(symbol);
 
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < count; i++) {
             const time = baseTime + i * this.candleIntervalMs;
             const open = price;
             // Deterministic pattern: Sine wave
@@ -291,15 +320,15 @@ export class DataService {
         return () => this.listeners.delete(listener);
     }
 
-    private generateInitialHistory() {
+    private generateInitialHistory(symbol: string = 'SPY') {
         // Generate last 100 candles
         const history: any[] = [];
         const now = Date.now();
-        let price = 1000;
+        let price = this.getBasePrice(symbol);
 
         for (let i = 100; i > 0; i--) {
             const time = now - i * this.candleIntervalMs;
-            const volatility = 2.0;
+            const volatility = price * 0.002; // 0.2% volatility relative to price
             const open = price;
             const close = price + (Math.random() - 0.5) * volatility;
             const high = Math.max(open, close) + Math.random();
@@ -318,57 +347,84 @@ export class DataService {
 
         this.currentCandles = DataNormalizer.normalizeArray(history);
         this.lastPrice = price;
-        // this.lastTimestamp = now;
     }
 
-    private startSimulation() {
+    private startPolling(symbol: string) {
         if (this.intervalId || this.isStatic) return;
 
-        this.intervalId = setInterval(() => {
-            const now = Date.now();
-            const currentCandle = this.currentCandles[this.currentCandles.length - 1];
+        console.log(`📡 Starting real-time polling for ${symbol}`);
 
-            // Check if we need a new candle or update existing
-            const isNewCandle = now - currentCandle.timestamp > this.candleIntervalMs;
+        this.intervalId = setInterval(async () => {
+            try {
+                // Fetch real-time quote
+                const quote = await this.fetchQuote(symbol);
+                if (!quote) return;
 
-            if (isNewCandle) {
-                // Finalize old candle (implicitly done by creating new one)
-                currentCandle.complete = true;
+                const now = Date.now();
+                // Ensure we have candles to update
+                if (this.currentCandles.length === 0) return;
 
-                // Create new partial candle
-                const newCandle: Candle = {
-                    timestamp: now,
-                    open: this.lastPrice,
-                    high: this.lastPrice,
-                    low: this.lastPrice,
-                    close: this.lastPrice,
-                    volume: 0,
-                    complete: false
-                };
-                this.currentCandles = [...this.currentCandles, newCandle];
-                // Keep buffer size fixed if needed, e.g. 1000
-                if (this.currentCandles.length > 500) {
-                    this.currentCandles.shift();
+                const currentCandle = this.currentCandles[this.currentCandles.length - 1];
+                const newPrice = quote.price;
+
+                // Check if we need a new candle or update existing
+                const isNewCandle = now - currentCandle.timestamp > this.candleIntervalMs;
+
+                if (isNewCandle) {
+                    // Finalize old candle
+                    currentCandle.complete = true;
+
+                    // Create new candle
+                    const newCandle: Candle = {
+                        timestamp: now,
+                        open: newPrice,
+                        high: newPrice,
+                        low: newPrice,
+                        close: newPrice,
+                        volume: 0,
+                        complete: false
+                    };
+                    this.currentCandles = [...this.currentCandles, newCandle];
+                    // Keep buffer size fixed
+                    if (this.currentCandles.length > 500) {
+                        this.currentCandles.shift();
+                    }
+                } else {
+                    // Update existing candle
+                    const update: Partial<Candle> = {
+                        close: newPrice,
+                        high: Math.max(currentCandle.high, newPrice),
+                        low: Math.min(currentCandle.low, newPrice),
+                        // Accumulate volume if available, else ignored
+                        complete: false
+                    };
+
+                    const updatedCandle = DataNormalizer.mergeUpdate(currentCandle, update);
+                    this.currentCandles[this.currentCandles.length - 1] = updatedCandle;
                 }
-            } else {
-                // Update existing candle (simulate ticks)
-                const change = (Math.random() - 0.5) * 1.5;
-                const newPrice = this.lastPrice + change;
 
-                const update: Partial<Candle> = {
-                    close: newPrice,
-                    volume: Math.floor(Math.random() * 10),
-                    complete: false
-                };
-
-                const updatedCandle = DataNormalizer.mergeUpdate(currentCandle, update);
-                this.currentCandles[this.currentCandles.length - 1] = updatedCandle;
                 this.lastPrice = newPrice;
+                this.notifyListeners();
+
+            } catch (error) {
+                console.warn('Polling failed:', error);
             }
+        }, 10000); // Poll every 10 seconds to avoid rate limits
+    }
 
-            this.notifyListeners();
-
-        }, this.updateRateMs);
+    private async fetchQuote(symbol: string): Promise<any> {
+        try {
+            const response = await fetch(`${BASE_URL}/quote`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ticker: symbol })
+            });
+            if (!response.ok) return null;
+            return await response.json();
+        } catch (e) {
+            console.error('Quote fetch error:', e);
+            return null;
+        }
     }
 
     private notifyListeners() {

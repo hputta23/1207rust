@@ -17,6 +17,7 @@ import type { Candle } from '../core/renderer/types';
 interface ChartConfig {
     id: string;
     symbol: string;
+    interval: string; // Added interval
     indicators: IndicatorConfig[];
 }
 
@@ -30,6 +31,8 @@ interface ChartPanelHeaderProps {
     onSymbolChange: (symbol: string) => void;
     indicators: IndicatorConfig[];
     onIndicatorsChange: (indicators: IndicatorConfig[]) => void;
+    interval: string;
+    onIntervalChange: (interval: string) => void;
     lastPrice?: number;
     priceChange?: number;
     onRemove?: () => void;
@@ -42,6 +45,8 @@ const ChartPanelHeader: React.FC<ChartPanelHeaderProps> = ({
     onSymbolChange,
     indicators,
     onIndicatorsChange,
+    interval,
+    onIntervalChange,
     lastPrice,
     priceChange,
     onRemove,
@@ -169,22 +174,23 @@ const ChartPanelHeader: React.FC<ChartPanelHeaderProps> = ({
                 {['1m', '5m', '15m', '1H', '4H', '1D'].map((tf, i) => (
                     <button
                         key={tf}
+                        onClick={() => onIntervalChange(tf)}
                         style={{
                             padding: '4px 8px',
-                            background: i === 3 ? '#3b82f6' : 'transparent',
+                            background: tf === interval ? '#3b82f6' : 'transparent',
                             border: 'none',
                             borderRadius: '3px',
-                            color: i === 3 ? '#fff' : '#666',
+                            color: tf === interval ? '#fff' : '#666',
                             fontSize: '11px',
                             fontWeight: 500,
                             cursor: 'pointer',
                             transition: 'all 0.15s ease',
                         }}
                         onMouseEnter={(e) => {
-                            if (i !== 3) e.currentTarget.style.background = '#252525';
+                            if (tf !== interval) e.currentTarget.style.background = '#252525';
                         }}
                         onMouseLeave={(e) => {
-                            if (i !== 3) e.currentTarget.style.background = 'transparent';
+                            if (tf !== interval) e.currentTarget.style.background = 'transparent';
                         }}
                     >
                         {tf}
@@ -242,13 +248,14 @@ const ChartPanel: React.FC<ChartPanelProps> = ({
         };
     }, []);
 
-    // Update data service config when data source changes
+    // Update data service config when data source changes or config changes
     useEffect(() => {
         if (dataServiceRef.current) {
             dataServiceRef.current.updateConfig(dataSourceConfig);
-            dataServiceRef.current.fetchHistory(config.symbol, '1d', '1mo');
+            // Dynamic interval fetching
+            dataServiceRef.current.fetchHistory(config.symbol, config.interval || '1d', undefined);
         }
-    }, [dataSourceConfig, config.symbol]);
+    }, [dataSourceConfig, config.symbol, config.interval]);
 
     const lastPrice = candles.length > 0 ? candles[candles.length - 1].close : undefined;
     const firstPrice = candles.length > 0 ? candles[0].open : undefined;
@@ -288,6 +295,8 @@ const ChartPanel: React.FC<ChartPanelProps> = ({
                 onSymbolChange={(symbol) => onConfigChange({ ...config, symbol })}
                 indicators={config.indicators}
                 onIndicatorsChange={(indicators) => onConfigChange({ ...config, indicators })}
+                interval={config.interval || '1d'}
+                onIntervalChange={(interval) => onConfigChange({ ...config, interval })}
                 lastPrice={lastPrice}
                 priceChange={priceChange}
                 onRemove={onRemove}
@@ -316,8 +325,8 @@ export function ChartsPage() {
     const [searchParams] = useSearchParams();
 
     const [charts, setCharts] = useState<ChartConfig[]>([
-        { id: generateId(), symbol: 'SPY', indicators: [{ id: 'sma', name: 'SMA 20', period: 20, color: '#f59e0b', enabled: true }] },
-        { id: generateId(), symbol: 'NVDA', indicators: [{ id: 'ema', name: 'EMA 20', period: 20, color: '#3b82f6', enabled: true }] },
+        { id: generateId(), symbol: 'SPY', interval: '5m', indicators: [{ id: 'sma', name: 'SMA 20', period: 20, color: '#f59e0b', enabled: true }] },
+        { id: generateId(), symbol: 'NVDA', interval: '5m', indicators: [{ id: 'ema', name: 'EMA 20', period: 20, color: '#3b82f6', enabled: true }] },
     ]);
 
     const syncManagerRef = useRef<TimeSyncManager | null>(null);
@@ -343,7 +352,7 @@ export function ChartsPage() {
     const addChart = useCallback(() => {
         setCharts(prev => [
             ...prev,
-            { id: generateId(), symbol: 'SPY', indicators: [] }
+            { id: generateId(), symbol: 'SPY', interval: '1D', indicators: [] }
         ]);
     }, []);
 

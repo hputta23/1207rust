@@ -1,34 +1,26 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { DeterministicRenderer } from '../../core/renderer/deterministic-renderer';
-import { TransformManager } from '../../core/interaction/transform-manager';
-import { InputHandler } from '../../core/interaction/input-handler';
-import { CrosshairManager, type CrosshairState } from '../../core/interaction/crosshair-manager';
-import { ChartOverlay } from '../Overlay/ChartOverlay';
-import type { RenderState, Theme } from '../../core/renderer/types';
+import React, { useEffect, useRef } from 'react';
+import { createChart, ColorType, type IChartApi, type ISeriesApi, type Time, CandlestickSeries, LineSeries } from 'lightweight-charts';
+import type { Theme, Candle } from '../../core/renderer/types';
 import { TimeSyncManager } from '../../core/synchronization/time-sync-manager';
-
-import { CanvasCandlestickRenderer } from '../../core/renderers/canvas-candlestick-renderer';
 
 interface IndicatorDataItem {
     id: string;
     name: string;
     color: string;
-    points: any[];
+    points: { x: number; y: number; defined: boolean }[];
 }
 
 interface ChartContainerProps {
-    id: string; // Unique chart ID
+    id: string;
     width: number;
     height: number;
     theme: Theme;
-    initialTransform?: { x: number; y: number; scale: number };
-    syncManager?: TimeSyncManager; // Optional sync manager
-    data: any[]; // Changed to accept data prop
+    syncManager?: TimeSyncManager;
+    data: Candle[];
     indicatorData?: {
-        sma?: any[];
-        ema?: any[];
         indicatorList?: IndicatorDataItem[];
     };
+    initialTransform?: any; // Add missing prop definition to avoid errors
 }
 
 export const ChartContainer: React.FC<ChartContainerProps> = ({
@@ -36,257 +28,209 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     width,
     height,
     theme,
-    initialTransform = { x: 0, y: 0, scale: 1 },
     syncManager,
     data,
     indicatorData
 }) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const rendererRef = useRef<DeterministicRenderer | CanvasCandlestickRenderer | null>(null);
-    const transformManagerRef = useRef<TransformManager | null>(null);
-    const inputHandlerRef = useRef<InputHandler | null>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
+    const chartContainerRef = useRef<HTMLDivElement>(null);
+    const chartRef = useRef<IChartApi | null>(null);
+    const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+    const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
 
-    // UI State
-    const [crosshair, setCrosshair] = useState<CrosshairState | null>(null);
-    const [renderError, setRenderError] = useState<string | null>(null);
-    const [isFallback, setIsFallback] = useState(false);
+    const [error, setError] = React.useState<string | null>(null);
 
-    // Initialize Engine
+    // 1. Initialize Chart
     useEffect(() => {
-        if (!canvasRef.current) return;
-
-        // 1. Renderer Initialization (WebGL -> 2D Fallback)
-        try {
-            rendererRef.current = new DeterministicRenderer(canvasRef.current);
-            setRenderError(null);
-            setIsFallback(false);
-            console.log(`[Chart ${id}] WebGL renderer initialized successfully.`);
-        } catch (e) {
-            console.warn(`[Chart ${id}] WebGL renderer failed, attempting 2D fallback:`, e);
-
-            // Fallback to 2D Renderer
-            try {
-                const ctx = canvasRef.current.getContext('2d');
-                if (ctx) {
-                    rendererRef.current = new CanvasCandlestickRenderer(ctx);
-                    setIsFallback(true);
-                    setRenderError(null); // Clear error since we have a fallback
-                    console.log(`[Chart ${id}] 2D renderer initialized as fallback.`);
-                } else {
-                    throw new Error('Could not get 2D context');
-                }
-            } catch (fallbackError) {
-                const errorMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown Renderer error';
-                console.error(`[Chart ${id}] Both WebGL and 2D renderers failed:`, fallbackError);
-                setRenderError(errorMsg);
-                return; // Stop initialization
-            }
-        }
-
-        let unsubscribeLocal: (() => void) | undefined;
-        let unsubscribeSync: (() => void) | undefined;
+        if (!chartContainerRef.current) return;
 
         try {
-            // 2. Transform (Interaction)
-            transformManagerRef.current = new TransformManager(initialTransform);
-
-            // 3. Input
-            inputHandlerRef.current = new InputHandler(transformManagerRef.current);
-            inputHandlerRef.current.attach(canvasRef.current);
-
-            // Handle Hover for Crosshair
-            inputHandlerRef.current.onMove = (mouseX, mouseY) => {
-                if (!transformManagerRef.current) return;
-
-                const viewport = {
-                    x: transformManagerRef.current.getState().x,
-                    y: transformManagerRef.current.getState().y,
-                    width,
-                    height,
-                    scale: transformManagerRef.current.getState().scale
-                };
-
-                const state = CrosshairManager.calculate(
-                    mouseX,
-                    mouseY,
-                    viewport,
-                    data,
-                    width,
-                    height
-                );
-
-                setCrosshair(state);
-            };
-
-            // 4. Subscribe to Local Transform Changes
-            unsubscribeLocal = transformManagerRef.current.subscribe((state) => {
-                if (syncManager) {
-                    syncManager.update({
-                        centerX: state.x,
-                        scale: state.scale
-                    }, id);
-                }
-                renderFrame();
+            const chart = createChart(chartContainerRef.current, {
+                width,
+                height,
+                layout: {
+                    background: { type: ColorType.Solid, color: '#0b0e11' }, // Deep void
+                    textColor: '#787b86',
+                    attributionLogo: false, // REMOVE TRADINGVIEW SYMBOL
+                    fontFamily: "'JetBrains Mono', 'Inter', 'Roboto', sans-serif",
+                },
+                grid: {
+                    vertLines: { color: '#1e222d', style: 1 }, // Dotted
+                    horzLines: { color: '#1e222d', style: 1 },
+                },
+                timeScale: {
+                    timeVisible: true,
+                    secondsVisible: false,
+                    borderColor: 'rgba(197, 203, 206, 0.1)', // Subtle border
+                    barSpacing: 10,
+                    minBarSpacing: 3,
+                },
+                rightPriceScale: {
+                    borderColor: 'rgba(197, 203, 206, 0.1)',
+                },
+                crosshair: {
+                    mode: 1, // Magnet
+                    vertLine: {
+                        color: '#6A5ACD', // Slate Blue crosshair
+                        width: 1,
+                        style: 3, // Large Dashed
+                        labelBackgroundColor: '#6A5ACD',
+                    },
+                    horzLine: {
+                        color: '#6A5ACD',
+                        width: 1,
+                        style: 3,
+                        labelBackgroundColor: '#6A5ACD',
+                    },
+                },
             });
 
-            // 5. Subscribe to Sync Manager (Incoming Changes)
+            const candleSeries = chart.addSeries(CandlestickSeries, {
+                upColor: '#00E5FF',     // Neon Cyan
+                downColor: '#FF2975',   // Neon Pink/Red
+                borderVisible: false,
+                wickUpColor: '#00E5FF',
+                wickDownColor: '#FF2975',
+            });
+
+            chartRef.current = chart;
+            candleSeriesRef.current = candleSeries;
+
+            // Sync Manager (Time Scale)
             if (syncManager) {
-                unsubscribeSync = syncManager.subscribe((syncState, sourceId) => {
-                    if (sourceId === id) return; // Ignore own updates
-                    if (transformManagerRef.current) {
-                        transformManagerRef.current.setState({
-                            x: syncState.centerX,
-                            scale: syncState.scale
-                        });
-                    }
+                chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+                    // Determine scale/position manual sync if needed
                 });
             }
 
-            renderFrame();
-
-        } catch (e) {
-            console.error(`Chart ${id} failed to initialize interaction:`, e);
-        }
-
-        return () => {
-            if (unsubscribeLocal) unsubscribeLocal();
-            if (unsubscribeSync) unsubscribeSync();
-            inputHandlerRef.current?.detach();
-        };
-    }, [syncManager]); // Re-init if syncManager changes
-
-    // Handle Resizing & Data
-    useEffect(() => {
-        // Re-bind input handler if needed (simplified for this update)
-        if (inputHandlerRef.current && transformManagerRef.current) {
-            inputHandlerRef.current.onMove = (mouseX, mouseY) => {
-                const viewport = {
-                    x: transformManagerRef.current!.getState().x,
-                    y: transformManagerRef.current!.getState().y,
-                    width,
-                    height,
-                    scale: transformManagerRef.current!.getState().scale
-                };
-                const state = CrosshairManager.calculate(mouseX, mouseY, viewport, data, width, height);
-                setCrosshair(state);
+            return () => {
+                chart.remove();
+                chartRef.current = null;
             };
+        } catch (err) {
+            console.error("Failed to initialize chart:", err);
+            setError(err instanceof Error ? err.message : 'Unknown chart error');
         }
+    }, []); // Run once on mount (or re-mount if container null)
 
-        if (canvasRef.current && rendererRef.current) {
-            // Resize canvas (important for 2D context to prevent blur/stretch)
-            // But DeterministicRenderer (WebGL) typically handles viewport in render()
-            // CanvasCandlestickRenderer relies on canvas dimensions.
-            canvasRef.current.width = width;
-            canvasRef.current.height = height;
-            renderFrame();
-        }
-    }, [width, height, theme, data]);
 
-    const renderFrame = () => {
-        if (!rendererRef.current || !canvasRef.current || !transformManagerRef.current) return;
+    // 2. Handle Resizing & Theme options
+    useEffect(() => {
+        if (!chartRef.current) return;
+        chartRef.current.applyOptions({
+            width,
+            height,
+            layout: {
+                background: { type: ColorType.Solid, color: '#0b0e11' }, // Keep void theme consistent
+                textColor: '#787b86',
+            },
+        });
+    }, [width, height, theme]);
+
+
+    // 3. Update Data
+    useEffect(() => {
+        if (!candleSeriesRef.current || data.length === 0) return;
 
         try {
-            const currentTransform = transformManagerRef.current.getState();
+            // Map Candle[] to Lightweight Charts format
+            // timestamps in ms -> seconds (Unix)
+            // Ensure data is sorted by time (required by lightweight-charts)
+            const chartData = data
+                .map(d => ({
+                    time: Math.floor(d.timestamp / 1000) as Time,
+                    open: d.open,
+                    high: d.high,
+                    low: d.low,
+                    close: d.close,
+                }))
+                .sort((a, b) => (a.time as number) - (b.time as number));
 
-            // Construct state (shared interface might need adjustment if Renderers diverge)
-            // DeterministicRenderer expects RenderState.
-            // CanvasCandlestickRenderer expects (candles, viewport, bounds).
-            // We need to branch logic based on isFallback.
-
-            const viewport = {
-                x: currentTransform.x,
-                y: currentTransform.y,
-                width: width,
-                height: height,
-                scale: currentTransform.scale
-            };
-
-            if (isFallback) {
-                // 2D Rendering
-                const renderer = rendererRef.current as CanvasCandlestickRenderer;
-                const _renderer = rendererRef.current as any; // Type assertion helper
-
-                // Manually clear for 2D
-                if (_renderer.ctx) {
-                    const ctx = _renderer.ctx as CanvasRenderingContext2D;
-                    ctx.fillStyle = theme.background;
-                    ctx.fillRect(0, 0, width, height);
+            // Filter out potential duplicates
+            const uniqueChartData = [];
+            let lastTime: number | null = null;
+            for (const item of chartData) {
+                if (lastTime !== (item.time as number)) {
+                    uniqueChartData.push(item);
+                    lastTime = item.time as number;
                 }
-
-                // Calculate View-adjusted subset of candles? 
-                // The 2D renderer 'render' method takes ALL candles and does its own mapping?
-                // Let's check CanvasCandlestickRenderer signature: render(candles, viewport, bounds)
-
-                const bounds = (renderer as any).calculateBounds ? (renderer as any).calculateBounds(data) : { minPrice: 0, maxPrice: 100 };
-
-                renderer.render(data, viewport, bounds);
-
-            } else {
-                // WebGL Rendering
-                const state: RenderState = {
-                    viewport,
-                    data: {
-                        candles: data,
-                        indicators: indicatorData,
-                        indicatorList: indicatorData?.indicatorList,
-                        minPrice: 0,
-                        maxPrice: 2000,
-                        minTime: 0,
-                        maxTime: 50
-                    },
-                    theme: theme,
-                    timestamp: Date.now()
-                };
-                (rendererRef.current as DeterministicRenderer).render(state);
             }
 
-        } catch (e) {
-            console.error('Render frame failed:', e);
+            // Debug log
+            // console.log("Updating Candle Data", uniqueChartData.length);
+
+            candleSeriesRef.current.setData(uniqueChartData);
+
+            // Update Indicators
+            if (chartRef.current && indicatorData?.indicatorList) {
+                // Clean up existing line series
+                indicatorSeriesRefs.current.forEach(series => {
+                    try {
+                        chartRef.current?.removeSeries(series);
+                    } catch (e) {
+                        console.warn("Failed to remove series", e);
+                    }
+                });
+                indicatorSeriesRefs.current.clear();
+
+                // Add new
+                indicatorData.indicatorList.forEach(ind => {
+                    if (!chartRef.current) return;
+
+                    const lineSeries = chartRef.current.addSeries(LineSeries, {
+                        color: ind.color,
+                        lineWidth: 2,
+                        priceLineVisible: false,
+                        lastValueVisible: false,
+                    });
+
+                    // Map points (index based) to time
+                    // Filter first for valid X index and Defined state
+                    const validPoints = ind.points.filter(p =>
+                        p.defined &&
+                        p.x >= 0 &&
+                        p.x < data.length &&
+                        data[p.x] !== undefined
+                    );
+
+                    const lineData = validPoints
+                        .map(p => ({
+                            time: Math.floor(data[p.x].timestamp / 1000) as Time,
+                            value: p.y
+                        }))
+                        .filter(item => item.value !== undefined && item.value !== null && !isNaN(item.value)) // Double check value
+                        .sort((a, b) => (a.time as number) - (b.time as number));
+
+                    // Filter duplicates for line data
+                    const uniqueLineData = [];
+                    let lastLineTime: number | null = null;
+                    for (const item of lineData) {
+                        if (lastLineTime !== (item.time as number)) {
+                            uniqueLineData.push(item);
+                            lastLineTime = item.time as number;
+                        }
+                    }
+
+                    if (uniqueLineData.length > 0) {
+                        lineSeries.setData(uniqueLineData);
+                        indicatorSeriesRefs.current.set(ind.id, lineSeries);
+                    }
+                });
+            }
+        } catch (err) {
+            console.error("Chart data update failed:", err);
+            // Don't crash the component
         }
-    };
+
+    }, [data, indicatorData]);
+
+    if (error) {
+        return <div style={{ color: 'red', padding: 20 }}>Chart Error: {error}</div>;
+    }
 
     return (
         <div
-            ref={containerRef}
-            style={{
-                width,
-                height,
-                position: 'relative',
-                overflow: 'hidden',
-                background: theme.background,
-                cursor: 'crosshair'
-            }}
-            onMouseLeave={() => setCrosshair(null)}
-        >
-            {renderError ? (
-                /* Error Fallback UI */
-                <div style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                    height: '100%', padding: '40px', textAlign: 'center', color: '#888',
-                }}>
-                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: '16px', opacity: 0.5 }}>
-                        <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                    <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: 600, color: '#aaa' }}>
-                        Chart Unavailable
-                    </h3>
-                    <p style={{ margin: 0, fontSize: '13px', lineHeight: 1.5, maxWidth: '400px' }}>{renderError}</p>
-                </div>
-            ) : (
-                <>
-                    <canvas ref={canvasRef} style={{ display: 'block' }} />
-                    <ChartOverlay width={width} height={height} crosshair={crosshair} />
-                    {isFallback && (
-                        <div style={{
-                            position: 'absolute', bottom: '8px', right: '8px',
-                            fontSize: '10px', color: '#666', pointerEvents: 'none'
-                        }}>
-                            2D Rendering Mode
-                        </div>
-                    )}
-                </>
-            )}
-        </div>
+            ref={chartContainerRef}
+            style={{ width: '100%', height: '100%' }}
+        />
     );
 };

@@ -16,6 +16,7 @@ const NewsTab = lazy(() => import('./pages/NewsTab').then(module => ({ default: 
 const WatchlistTab = lazy(() => import('./pages/WatchlistTab').then(module => ({ default: module.WatchlistTab })));
 const TradingPage = lazy(() => import('./pages/TradingPage').then(module => ({ default: module.TradingPage })));
 const AnalyticsTab = lazy(() => import('./pages/AnalyticsTab').then(module => ({ default: module.AnalyticsTab })));
+const SonnyPage = lazy(() => import('./pages/SonnyPage'));
 const WhatIfTab = lazy(() => import('./pages/WhatIfTab').then(module => ({ default: module.WhatIfTab })));
 
 // Loading Component
@@ -151,6 +152,22 @@ function AppContent() {
               News
             </Link>
             <Link
+              to="/sonny"
+              style={{
+                padding: '8px 16px',
+                background: location.pathname === '/sonny' ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+                border: location.pathname === '/sonny' ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid transparent',
+                borderRadius: '6px',
+                color: location.pathname === '/sonny' ? '#3b82f6' : '#888',
+                fontSize: '14px',
+                fontWeight: 500,
+                textDecoration: 'none',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Sonny
+            </Link>
+            <Link
               to="/watchlist"
               style={{
                 padding: '8px 16px',
@@ -268,7 +285,7 @@ function AppContent() {
       </div>
 
       {/* Main Content Area */}
-      <div style={{ flex: 1 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         <Suspense fallback={<LoadingScreen />}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -276,6 +293,7 @@ function AppContent() {
             <Route path="/news" element={<NewsTab />} />
             <Route path="/watchlist" element={<WatchlistTab />} />
             <Route path="/trading" element={<TradingPage />} />
+            <Route path="/sonny" element={<SonnyPage />} />
             <Route path="/analytics" element={<AnalyticsTab />} />
             <Route path="/what-if" element={<WhatIfTab />} />
           </Routes>

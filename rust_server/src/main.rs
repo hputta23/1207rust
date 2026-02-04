@@ -34,6 +34,7 @@ async fn main() {
         .route("/health", get(health_check))
         .route("/simulate", post(simulate_handler))
         .route("/backtest", post(backtest_handler)) 
+        .route("/predict", post(predict_handler)) // Added Mock Predict
         .route("/history", post(history_handler)) 
         .route("/quote", post(quote_handler))
         .route("/agent/chat", post(agent::chat_handler)) // New Agent Route
@@ -121,6 +122,85 @@ async fn quote_handler(
         }
         Err(e) => {
              println!("❌ Error fetching quote: {}", e);
+             (StatusCode::INTERNAL_SERVER_ERROR, format!("Data Error: {}", e)).into_response()
+        }
+    }
+}
+
+// --- Prediction Logic (Mock/Placeholder for ML) ---
+
+#[derive(Serialize)]
+struct PredictResponse {
+    ticker: String,
+    results: Vec<ModelResult>,
+    metrics: Metrics,
+}
+
+#[derive(Serialize)]
+struct ModelResult {
+    model: String,
+    predictions: Vec<PredictionPoint>,
+}
+
+#[derive(Serialize)]
+struct PredictionPoint {
+    date: String,
+    price: f64,
+}
+
+#[derive(Serialize)]
+struct Metrics {
+    rmse: f64,
+    mae: f64,
+}
+
+async fn predict_handler(
+    Json(payload): Json<PredictionRequest>,
+) -> impl IntoResponse {
+    println!("⚡ Request: Predict {} with Model: {:?}", payload.ticker, payload.ticker); 
+
+    // 1. Fetch Data (mock or real) to base prediction on
+    let data_result = data::fetch_ticker_data(&payload.ticker, "1d", "1y").await;
+
+    match data_result {
+        Ok(data) => {
+            let last_price = data.current_price;
+            let mut predictions = Vec::new();
+            
+            // Simple random walk for mock prediction
+            let mut current_price = last_price;
+            let dates = match data.dates.last() {
+                Some(d) => d.clone(),
+                None => Utc::now().to_rfc3339(),
+            };
+            
+            let start_date = chrono::NaiveDateTime::parse_from_str(&dates, "%Y-%m-%dT%H:%M:%S").unwrap_or_default();
+
+            for i in 1..=payload.days {
+                let change = (rand::random::<f64>() - 0.5) * 0.03; // 3% volatility
+                current_price *= 1.0 + change;
+                
+                let next_day = start_date + chrono::Duration::days(i as i64);
+                
+                predictions.push(PredictionPoint {
+                    date: next_day.format("%Y-%m-%dT%H:%M:%S").to_string(),
+                    price: current_price,
+                });
+            }
+
+            Json(PredictResponse {
+                ticker: payload.ticker,
+                results: vec![ModelResult {
+                    model: "rust_mock_ml".to_string(),
+                    predictions,
+                }],
+                metrics: Metrics {
+                    rmse: last_price * 0.02, // Mock metrics
+                    mae: last_price * 0.015,
+                },
+            }).into_response()
+        }
+        Err(e) => {
              (StatusCode::INTERNAL_SERVER_ERROR, format!("Data Error: {}", e)).into_response()
         }
     }

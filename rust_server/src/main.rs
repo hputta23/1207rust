@@ -40,6 +40,7 @@ async fn main() {
         .layer(cors);
 
     // Get PORT from environment or default to 8001
+    println!("🔄 Server starting up (Deployment Trigger)...");
     let port = std::env::var("PORT").unwrap_or_else(|_| "8001".to_string());
     let addr = format!("0.0.0.0:{}", port);
     println!("🚀 Rust Server listening on http://{}", addr);
